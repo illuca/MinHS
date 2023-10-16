@@ -1,0 +1,14 @@
+/.stack-work/
+/MinHS/
+/tests/
+/Main.hs
+/minhs1.cabal
+/minhs1.iml
+/README.md
+/run_tests_cabal.sh
+/run_tests_stack.sh
+/Setup.hs
+/stack.yaml
+/stack.yaml.lock
+/.idea/
+/mhs_tests/task1/
