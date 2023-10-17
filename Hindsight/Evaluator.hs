@@ -29,8 +29,10 @@ evaluate (CBind _ _ _ e) =
 --- From here is where you should put your work!
 data Value = I Integer
            | B Bool
-           | Nil
-           | Cons Integer Value
+           | Nil | Cons Integer Value
+           | F VType
+           | U CType
+           | Arrow VType CType
            -- TODO: others as needed
 
 data Terminal =
@@ -43,53 +45,95 @@ evalV e (Con "True") = B True
 evalV e (Con "False") = B False
 evalV e (Con "Nil") = Nil
 
+evalV env (Var x) =
+  case E.lookup env x of
+    Just v  -> v
+    Nothing -> error $ "Variable " ++ x ++ " not found in environment"
+
 evalV _ _ = error "TODO: implement evalV"
+
 evalC :: VEnv -> CExp -> Terminal
 
+evalC env (If vexp1 cexp1 cexp2) =
+  let B v1 = evalV env vexp1
+  in case v1 of
+     True -> evalC env cexp1
+     _ -> evalC env cexp2
 
-{--
-| Add
-| Sub
-| Mul
-| Quot
-| Rem
-| Neg
-| Gt
-| Ge
-| Lt
-| Le
-| Eq
-| Ne
-| Head
-| Tail
-| Null
---}
-evalC env (App (App (Prim op) e1) e2) =
+
+evalC env (App (App (Prim op) vexp1) vexp2) =
   case op of
-    Add -> P(I (v1 + v2))
-    Sub -> P(I (v1 - v2))
-    Mul -> P(I (v1 * v2))
-    Quot -> P(I (v1 `quot` v2))
-    Rem -> P(I (v1 `rem` v2))
-    Eq -> P(B (v1 == v2))
-    Ne -> P(B (v1 /= v2))
-    Neg -> P(I (v1 - v2))
-    Gt -> P(B (v1 > v2))
-    Ge -> P(B (v1 >= v2))
-    Lt -> P(B (v1 < v2))
-    Le -> P(B (v1 <= v2))
+    Add -> P(I (a + b))
+    Sub -> P(I (a - b))
+    Mul -> P(I (a * b))
+    Quot -> if b == 0
+            then error "The denominator cannot be 0."
+            else P(I (a `quot` b))
+    Rem -> P(I (a `rem` b))
+    Eq -> P(B (a == b))
+    Ne -> P(B (a /= b))
+    Neg -> P(I (a - b))
+    Gt -> P(B (a > b))
+    Ge -> P(B (a >= b))
+    Lt -> P(B (a < b))
+    Le -> P(B (a <= b))
   where
-      I v1 = evalV env e1
-      I v2 = evalV env e2
+    v1 = evalV env vexp1
+    v2 = evalV env vexp2
+    a = case v1 of
+      I i -> i
+      _ -> error "Unexpected value"
+    b = case v2 of
+      I i -> i
+      _ -> error "Unexpected value"
+
+evalC env (App (Prim Neg) vexp) =
+  let I v = evalV env vexp
+  in P (I (- v))
+
+evalC env (App (Prim Null) vexp) =
+  let v = evalV env vexp
+  in case v of
+     Nil -> P (B True)
+     Cons _ _ -> P (B False)
+
+evalC env (Produce vexp) =
+   let v = evalV env vexp
+   in P v
 
 
-evalC e (Produce v1) =
-   let v2 = evalV e v1
-   in P v2
+evalC env (App (App (Force (Con "Cons")) vexp1) vexp2) =
+  let I v1 = evalV env vexp1
+      v2 = evalV env vexp2
+  in P (Cons v1 v2)
 
---evalC e (Produce v1) =
---   P v2
---   where v2 = evalV e v1
+
+evalC env (Reduce id cexp1 (App (Prim Head) (Var x))) =
+    let P v1 = evalC env cexp1
+        newEnv = E.add env (id, v1)
+        Cons v vs = evalV newEnv (Var x)
+    in P (I v)
+
+evalC env (Reduce id cexp1 (App (Prim Tail) (Var x))) =
+    let P v1 = evalC env cexp1
+        newEnv = E.add env (id, v1)
+        Cons v vs = evalV newEnv (Var x)
+    in P vs
+
+evalC env (Reduce id cexp1 cexp2) =
+  let P v1 = evalC env cexp1
+      newEnv = E.add env (id, v1)
+      v2 = evalC newEnv cexp2
+  in v2
+
+evalC env (Let binds cexp) =
+  let newBindings = [(id, evalV env vexp) | VBind id _ vexp <- binds]
+      newEnv = E.addAll env newBindings
+      v2 = evalC newEnv cexp
+  in v2
+
+
+
 --evalC env (Force (Cons x xs)) = vx : vs
 --  where
 --        I vs = evalV env xs

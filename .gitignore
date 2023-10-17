@@ -12,3 +12,12 @@
 /stack.yaml.lock
 /.idea/
 /mhs_tests/task1/
+/out/production/minhs1/.gitignore
+/out/production/minhs1/Hindsight/CBNCompile.hs
+/out/production/minhs1/Hindsight/CBVCompile.hs
+/out/production/minhs1/Hindsight/Evaluator.hs
+/out/production/minhs1/Hindsight/Optimiser.hs
+/out/production/minhs1/Hindsight/Parse.hs
+/out/production/minhs1/Hindsight/Pretty.hs
+/out/production/minhs1/Hindsight/Syntax.hs
+/out/production/minhs1/Hindsight/TypeChecker.hs
