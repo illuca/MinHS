@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+
 module Hindsight.Evaluator where
 
 import Data.List
@@ -33,6 +35,7 @@ data Value = I Integer
            | F VType
            | U CType
            | Arrow VType CType
+           | Tk VEnv VExp
            -- TODO: others as needed
 
 data Terminal =
@@ -40,17 +43,21 @@ data Terminal =
            -- TODO: others as needed
 
 evalV :: VEnv -> VExp -> Value
-evalV e (Num n) = I n
-evalV e (Con "True") = B True
-evalV e (Con "False") = B False
-evalV e (Con "Nil") = Nil
+evalV env (Num n) = I n
+evalV env (Con "True") = B True
+evalV env (Con "False") = B False
+evalV env (Con "Nil") = Nil
 
 evalV env (Var x) =
   case E.lookup env x of
     Just v  -> v
     Nothing -> error $ "Variable " ++ x ++ " not found in environment"
 
+evalV env (Thunk t) = Tk env (Thunk t)
+
 evalV _ _ = error "TODO: implement evalV"
+
+
 
 evalC :: VEnv -> CExp -> Terminal
 
@@ -87,9 +94,11 @@ evalC env (App (App (Prim op) vexp1) vexp2) =
       I i -> i
       _ -> error "Unexpected value"
 
+
 evalC env (App (Prim Neg) vexp) =
   let I v = evalV env vexp
   in P (I (- v))
+
 
 evalC env (App (Prim Null) vexp) =
   let v = evalV env vexp
@@ -97,34 +106,34 @@ evalC env (App (Prim Null) vexp) =
      Nil -> P (B True)
      Cons _ _ -> P (B False)
 
+evalC env (App (Prim Tail) vexp) =
+  let res = evalV env vexp
+  in case res of
+    Cons v vs -> P vs
+    _ -> error "List cannot be empty."
+
+evalC env (App (Prim Head) vexp) =
+  let res = evalV env vexp
+  in case res of
+    Cons v vs -> P (I v)
+    _ -> error "List cannot be empty."
+
 evalC env (Produce vexp) =
    let v = evalV env vexp
    in P v
-
 
 evalC env (App (App (Force (Con "Cons")) vexp1) vexp2) =
   let I v1 = evalV env vexp1
       v2 = evalV env vexp2
   in P (Cons v1 v2)
 
-
-evalC env (Reduce id cexp1 (App (Prim Head) (Var x))) =
-    let P v1 = evalC env cexp1
-        newEnv = E.add env (id, v1)
-        Cons v vs = evalV newEnv (Var x)
-    in P (I v)
-
-evalC env (Reduce id cexp1 (App (Prim Tail) (Var x))) =
-    let P v1 = evalC env cexp1
-        newEnv = E.add env (id, v1)
-        Cons v vs = evalV newEnv (Var x)
-    in P vs
-
 evalC env (Reduce id cexp1 cexp2) =
-  let P v1 = evalC env cexp1
-      newEnv = E.add env (id, v1)
-      v2 = evalC newEnv cexp2
-  in v2
+  let res = evalC env cexp1
+      -- strict evaluation, bind result of c-exp to name
+      !_ = res `seq` ()
+      P v1 = res
+      newEnv =  E.add env (id, v1)
+  in evalC newEnv cexp2
 
 evalC env (Let binds cexp) =
   let newBindings = [(id, evalV env vexp) | VBind id _ vexp <- binds]
@@ -133,8 +142,12 @@ evalC env (Let binds cexp) =
   in v2
 
 
+evalC env (Force vexp) =
+  let v = evalV env vexp
+  in case v of
+    Tk env' (Thunk t) -> evalC env' t
+    _ -> error "Arguments after Force is not valid."
 
---evalC env (Force (Cons x xs)) = vx : vs
---  where
---        I vs = evalV env xs
-evalC _ _ = error "TODO: implement evalC"
+--evalC env (Reduce id cexp1 cexp2) =
+
+--evalC env cexp = cexp
