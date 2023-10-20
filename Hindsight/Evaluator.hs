@@ -32,14 +32,13 @@ evaluate (CBind _ _ _ e) =
 data Value = I Integer
            | B Bool
            | Nil | Cons Integer Value
-           | F VType
-           | U CType
-           | Arrow VType CType
            | Tk VEnv VExp
+           | VF VEnv CExp
+           deriving (Show)
            -- TODO: others as needed
 
-data Terminal =
-           P Value
+data Terminal = P Value
+              | TF VEnv CExp
            -- TODO: others as needed
 
 evalV :: VEnv -> VExp -> Value
@@ -56,8 +55,6 @@ evalV env (Var x) =
 evalV env (Thunk t) = Tk env (Thunk t)
 
 evalV _ _ = error "TODO: implement evalV"
-
-
 
 evalC :: VEnv -> CExp -> Terminal
 
@@ -127,6 +124,33 @@ evalC env (App (App (Force (Con "Cons")) vexp1) vexp2) =
       v2 = evalV env vexp2
   in P (Cons v1 v2)
 
+evalC env (Recfun cbind) =
+  TF env (Recfun cbind)
+
+evalC env (Force vexp) =
+  let v = evalV env vexp
+  in case v of
+    Tk env' (Thunk t) -> evalC env' t
+    VF env' recfun -> evalC env' recfun
+    _ -> error $ "Arguments after Force is not valid." ++ show v
+
+evalC env (App cexp vexp) =
+  {-
+    cexp can be recfun, force, prim operators
+    if recfun, then eval it to TF
+  -}
+  let t = evalC env cexp
+      v = evalV env vexp
+  in case t of
+--    CBind Id CType [Id] CExp
+    TF env' (Recfun cbind) ->
+          let CBind f ty names body = cbind
+              name = head names
+              newEnv = E.addAll env' [(f, toV t),(name, v)]
+          in evalC newEnv body
+    _ -> error "Invalid argument."
+
+
 evalC env (Reduce id cexp1 cexp2) =
   let res = evalC env cexp1
       -- strict evaluation, bind result of c-exp to name
@@ -135,19 +159,10 @@ evalC env (Reduce id cexp1 cexp2) =
       newEnv =  E.add env (id, v1)
   in evalC newEnv cexp2
 
-evalC env (Let binds cexp) =
-  let newBindings = [(id, evalV env vexp) | VBind id _ vexp <- binds]
+evalC env (Let vbinds cexp) =
+  let newBindings = [(id, evalV env vexp) | VBind id _ vexp <- vbinds]
       newEnv = E.addAll env newBindings
-      v2 = evalC newEnv cexp
-  in v2
+  in evalC newEnv cexp
 
-
-evalC env (Force vexp) =
-  let v = evalV env vexp
-  in case v of
-    Tk env' (Thunk t) -> evalC env' t
-    _ -> error "Arguments after Force is not valid."
-
---evalC env (Reduce id cexp1 cexp2) =
-
---evalC env cexp = cexp
+toV :: Terminal -> Value
+toV (TF env recfun) = VF env recfun
