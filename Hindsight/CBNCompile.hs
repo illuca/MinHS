@@ -15,5 +15,7 @@ compileCType _ = error "TODO: implement compileCType"
 compileVType :: M.Type -> T.VType
 compileVType _ = error "TODO: implement compileVType"
 
+
 compileC :: M.Exp -> T.CExp
+compileC (M.Num n) = T.Produce (T.Num n)
 compileC _ = error "TODO: implement compileC"

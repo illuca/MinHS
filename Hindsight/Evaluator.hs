@@ -9,6 +9,7 @@ import MinHS.Syntax(Op(..),TyCon(..))
 import MinHS.Pretty(datacon,numeric,ANSIPretty(..))
 import Prettyprinter as PP
 import Prettyprinter.Render.Terminal
+import qualified Data.Map as M
 
 instance {-# OVERLAPPING #-} ANSIPretty Value where
   ansipp (I i) = numeric $ i
@@ -32,13 +33,13 @@ evaluate (CBind _ _ _ e) =
 data Value = I Integer
            | B Bool
            | Nil | Cons Integer Value
-           | Tk VEnv VExp
-           | VF VEnv CExp
+           | VThunk VEnv VExp
+           | VFunc VEnv CExp -- value func
            deriving (Show)
            -- TODO: others as needed
 
 data Terminal = P Value
-              | TF VEnv CExp
+              | TFunc VEnv CExp -- terminal func
            -- TODO: others as needed
 
 evalV :: VEnv -> VExp -> Value
@@ -52,7 +53,7 @@ evalV env (Var x) =
     Just v  -> v
     Nothing -> error $ "Variable " ++ x ++ " not found in environment"
 
-evalV env (Thunk t) = Tk env (Thunk t)
+evalV env (Thunk t) = VThunk env (Thunk t)
 
 evalV _ _ = error "TODO: implement evalV"
 
@@ -63,7 +64,6 @@ evalC env (If vexp1 cexp1 cexp2) =
   in case v1 of
      True -> evalC env cexp1
      _ -> evalC env cexp2
-
 
 evalC env (App (App (Prim op) vexp1) vexp2) =
   case op of
@@ -91,7 +91,6 @@ evalC env (App (App (Prim op) vexp1) vexp2) =
       I i -> i
       _ -> error "Unexpected value"
 
-
 evalC env (App (Prim Neg) vexp) =
   let I v = evalV env vexp
   in P (I (- v))
@@ -115,9 +114,21 @@ evalC env (App (Prim Head) vexp) =
     Cons v vs -> P (I v)
     _ -> error "List cannot be empty."
 
+-- support 0 argument for + - * /
+evalC env (Prim op) = P (evalV env (Thunk (Prim op)))
+evalC env (Force (Con "Cons")) = P (evalV env (Thunk (Force (Con "Cons"))))
+
+---- support 1 argument for + - * / Cons begin ----
+-- support operations like 10-, 10+, 8*
+evalC env (App (Prim op) vexp) = P (evalV env (Thunk (App (Prim op) vexp)))
+-- support operations like Cons 1
+evalC env (App (Force (Con "Cons")) vexp) = P (evalV env (Thunk (App (Force (Con "Cons")) vexp)))
+---- support 1 argument for + - * / Cons end ----
+
 evalC env (Produce vexp) =
    let v = evalV env vexp
    in P v
+
 
 evalC env (App (App (Force (Con "Cons")) vexp1) vexp2) =
   let I v1 = evalV env vexp1
@@ -125,13 +136,13 @@ evalC env (App (App (Force (Con "Cons")) vexp1) vexp2) =
   in P (Cons v1 v2)
 
 evalC env (Recfun cbind) =
-  TF env (Recfun cbind)
+  TFunc env (Recfun cbind)
 
 evalC env (Force vexp) =
   let v = evalV env vexp
   in case v of
-    Tk env' (Thunk t) -> evalC env' t
-    VF env' recfun -> evalC env' recfun
+    VThunk env' (Thunk t) -> evalC env' t
+    VFunc env' recfun -> evalC env' recfun
     _ -> error $ "Arguments after Force is not valid." ++ show v
 
 evalC env (App cexp vexp) =
@@ -141,13 +152,17 @@ evalC env (App cexp vexp) =
   -}
   let t = evalC env cexp
       v = evalV env vexp
+  -- in error $ "Some error message: " ++ show env
   in case t of
---    CBind Id CType [Id] CExp
-    TF env' (Recfun cbind) ->
+    -- CBind Id CType [Id] CExp
+    TFunc env' (Recfun cbind) ->
           let CBind f ty names body = cbind
               name = head names
               newEnv = E.addAll env' [(f, toV t),(name, v)]
           in evalC newEnv body
+    P (VThunk env' (Thunk app)) ->
+        let newEnv = expandEnv env env'
+        in evalC newEnv (App app vexp)
     _ -> error "Invalid argument."
 
 
@@ -165,4 +180,7 @@ evalC env (Let vbinds cexp) =
   in evalC newEnv cexp
 
 toV :: Terminal -> Value
-toV (TF env recfun) = VF env recfun
+toV (TFunc env recfun) = VFunc env recfun
+
+expandEnv :: VEnv -> VEnv -> VEnv
+expandEnv (E.Env env) (E.Env env') = E.Env (M.union env env')
